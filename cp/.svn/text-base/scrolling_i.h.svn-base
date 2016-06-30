@@ -1,0 +1,56 @@
+
+#ifndef H_SCROLLING_I_BENNIS_20130131
+#define H_SCROLLING_I_BENNIS_20130131
+
+#define INVALIDATE_NULL         0
+#define INVALIDATE_ALL          ((unsigned int)-1)
+#define INVALIDATE_BUTTON       0x00000001
+#define INVALIDATE_SLIDER       0x00000002
+#define INVALIDATE_BACKGROUND   0x00000004
+#define INVALIDATE_FOREGROUND   0x00000008
+
+typedef struct {
+    EWin_InheritInfo_ForHeader ewii;
+    RECT wndRect;           // Window location which is relative to the whole scrolling control
+} SCR_ScrollingWndInfo_ForHeader;
+
+typedef struct {
+    SCR_ScrollingWndInfo_ForHeader scrolling;
+} SCR_ScrollingMainWinDescriptor;
+
+typedef struct {
+    SCR_ScrollingWndInfo_ForHeader scrolling;
+    gg_handler pageNode;
+    HTHEME background;
+    void * backgroundData;
+} SCR_ScrollingPageDescriptor;
+
+typedef struct {
+    SCR_ScrollingWndInfo_ForHeader scrolling;
+    gg_handler buttonNode;
+    char * nameOn;
+	char * button_type;
+	char * btn_up;
+	char * btn_down;
+    HTHEME buttonOn;
+    void * buttonOnData;
+    char * nameOff;
+	void * hSlider;
+    HTHEME buttonOff;
+    void * buttonOffData;
+    int buttonStatus;
+	int invalidate;
+    unsigned inva;
+} SCR_ScrollingButtonDescriptor;
+
+extern H_WIN ScrollingAppendManage(char * name, SCR_ScrollingWndInfo_ForHeader * inherit);
+extern H_WIN ScrollingAppendPage(char * name, SCR_ScrollingWndInfo_ForHeader * inherit, int size, gg_handler pageNode, H_WIN hLayer, __pGUI_WIN_CB wndProc);
+extern H_WIN ScrollingAppendButton(char * name, SCR_ScrollingWndInfo_ForHeader * inherit, gg_handler buttonNode, __pGUI_WIN_CB wndProc);
+
+typedef H_WIN (*BuilderCreate)(SCR_ScrollingWndInfo_ForHeader * inherit, gg_handler pageNode);
+extern H_WIN SCR_ScrollingHostBuilder(EWin_InheritInfo_ForHeader * inherit, BuilderCreate create, gg_handler windowNode);
+extern H_WIN ScrollingCreate_V0001(SCR_ScrollingWndInfo_ForHeader * inherit, gg_handler pageNode);
+extern H_WIN ScrollingBorderWndCreate_V0001(char * name, SCR_ScrollingWndInfo_ForHeader * inherit);
+
+#endif
+

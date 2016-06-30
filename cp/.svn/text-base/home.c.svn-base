@@ -1,0 +1,191 @@
+
+#include "cp_i.h"
+#include "scrolling_i.h"
+#include "setting.h"
+
+#ifdef THIS_DEBUG
+#undef THIS_DEBUG
+#endif
+
+#ifdef MW_PROJ_DEBUG
+#define THIS_DEBUG
+#endif
+
+static int homeSysTimeInit(void)
+{
+    __time_t tm;
+    __date_t date;
+
+    tm.hour = 23;
+    tm.minute = 59;
+    tm.second = 30;
+    date.year = 2013;
+    date.month = 1;
+    date.day = 20;
+    esTIME_SetTime(&tm);
+    esTIME_SetDate(&date);
+    return 0;
+}
+
+typedef struct {
+    EWin_InheritInfo_ForHeader ewii;
+    void * inertia;
+    H_WIN hFocusWin; // Current child window
+} HomeDescriptor;
+
+static HomeDescriptor * homeWndInit(__gui_msg_t * msg)
+{
+    HomeDescriptor * hdp;
+    gg_handler domUIConfig;
+    gg_handler node;
+    char ** attr;
+    int i;
+
+    hdp = esMEMS_Malloc(0, sizeof(HomeDescriptor));
+    if (NULL == hdp) {
+        LogE("Malloc failed");
+        return NULL;
+    }
+    eLIBs_memset(hdp, 0, sizeof(HomeDescriptor));
+
+    /* UI config */
+    domUIConfig = (gg_handler)GUI_WinGetAttr(msg->h_deswin);
+    node = GG_DOMGetRoot(domUIConfig);
+    if (0 == eLIBs_strcmp(GG_DOMGetNodeName(node), "config")) {
+        LogE("UI config XML root node ok");
+    } else {
+        LogE("UI config XML root node error");
+        return NULL;
+    }
+
+    // Set the volume
+    dsk_volume_set(100);
+    homeSysTimeInit();
+    GUI_SetScnDir(GUI_SCNDIR_NORMAL);
+    dsk_display_set_lcd_bright(LION_BRIGHT_LEVEL15);
+
+    hdp->ewii.magic = EWIN_INFO_MAGIC;
+    hdp->ewii.desktop = msg->h_deswin;
+    hdp->ewii.hWnd = hdp->ewii.desktop;
+    GUI_GetScreenSize((__s32 *)&hdp->ewii.desktopSize.width, (__s32 *)&hdp->ewii.desktopSize.height);
+    GG_FillRect(&hdp->ewii.wndRect, 0, 0,
+                    hdp->ewii.desktopSize.width, hdp->ewii.desktopSize.height);
+    // Initiate the font module
+    hdp->ewii.gdi.font = GUI_SFT_CreateFont(CP_SYS_FONT_SIZE, CP_SYS_FONT_PATH);
+    hdp->ewii.gdi.fontSize = CP_SYS_FONT_SIZE;
+    hdp->ewii.gestureArgs.htimer = hdp->ewii.desktop;
+    hdp->ewii.gestureArgs.timerid = HOME_GESTURE_TIMER;
+    hdp->inertia = GG_GestureOpen();
+
+    /* UI config */
+    node = GG_DOMGetFirstChild(node);
+    //node = GG_DOMGetBrotherElementByTagName(node, "window");
+    if (node) {
+        hdp->hFocusWin = SCR_ScrollingHostBuilder(&hdp->ewii, ScrollingCreate_V0001, node);
+    } else {
+        LogE("No window node in XML file");
+        return NULL;
+    }
+    return hdp;
+}
+
+static __s32 homeWndProc(__gui_msg_t * msg)
+{
+    HomeDescriptor * hdp;
+    H_WIN wndGesture;
+    EWin_InheritInfo_ForHeader * extWinIfno;
+	H_WIN hwnd;
+    char name[20];
+    hdp = (HomeDescriptor *)GUI_WinGetAddData(msg->h_deswin);
+    if (NULL == hdp) {
+        if (GUI_MSG_CREATE != msg->id) {
+            LogE("Failed to get home window private date, message ID (%d)", msg->id);
+            return GUI_ManWinDefaultProc(msg);
+        }
+    }
+
+    switch (msg->id) {
+    case GUI_MSG_CREATE:
+        hdp = homeWndInit(msg);
+        if (!hdp) {
+            GUI_PostQuitMessage(msg->h_deswin);
+            LogE("Create Home window failed");
+            return -1;
+        }
+        GUI_WinSetAddData(msg->h_deswin, (__u32)hdp);
+        GUI_WinSetFocusChild(hdp->hFocusWin);
+        break;
+    case GUI_MSG_DESTROY:
+        GG_GestureClose(hdp->inertia);
+        if (hdp->ewii.gdi.font) {
+            GUI_SFT_ReleaseFont(hdp->ewii.gdi.font);
+        }
+        esMEMS_Mfree(0, hdp);
+        break;
+    case GUI_MSG_TOUCH:
+#ifdef THIS_DEBUG
+        //LogMI("Touch:%x,%d,%d", msg->dwAddData1, LOSWORD(msg->dwAddData2), HISWORD(msg->dwAddData2));
+#endif
+        if (GUI_MSG_TOUCH_DOWN == msg->dwAddData1) {
+            wndGesture = EWin_GestureAttrCollect(GUI_WinGetFocusChild(msg->h_deswin), LOSWORD(msg->dwAddData2), HISWORD(msg->dwAddData2));
+            if (wndGesture) {
+                extWinIfno = GUI_WinGetAttr(wndGesture);
+                GG_GestureOnDown(hdp->inertia, msg, LOSWORD(msg->dwAddData2), HISWORD(msg->dwAddData2), &extWinIfno->gestureArgs);
+            }
+        } else if (GUI_MSG_TOUCH_MOVE == msg->dwAddData1) {
+            GG_GestureOnMove(hdp->inertia, msg, LOSWORD(msg->dwAddData2), HISWORD(msg->dwAddData2));
+        } else if (GUI_MSG_TOUCH_UP == msg->dwAddData1) {
+            GG_GestureOnUp(hdp->inertia, msg, LOSWORD(msg->dwAddData2), HISWORD(msg->dwAddData2));
+        }else if(GUI_MSG_TOUCH_LONGDOWN == msg->dwAddData1){
+            GG_GestureOnLpress(hdp->inertia, msg, LOSWORD(msg->dwAddData2), HISWORD(msg->dwAddData2));
+		}
+        break;
+    case GUI_MSG_TIMER:
+        if (HOME_GESTURE_TIMER == msg->dwAddData1) {
+            GG_GestureOnTimer(hdp->inertia, msg);
+        }
+        break;
+    case GUI_MSG_USER_WIN_CHANGE:
+        if (HOME_SUBWIN_SETTING == msg->dwAddData2) {
+            hdp->hFocusWin = SettingWndCreate(&hdp->ewii);
+            GUI_WinSetFocusChild(hdp->hFocusWin);
+        } else {
+            GUI_ManWinDelete(hdp->hFocusWin);
+            GUI_WinSetFocusChild(GUI_WinGetFirstChild(msg->h_deswin));
+        }
+        break;
+    default:
+#ifdef THIS_DEBUG
+        LogMI("Unhandled home window message (%d)", msg->id);
+#endif
+		GUI_ManWinDefaultProc(msg);
+        break;
+    }
+    return 0;
+}
+
+H_WIN HomeWndCreate(H_WIN parent, gg_handler domUIConfig)
+{
+    H_WIN hWin;
+    __gui_manwincreate_para_t createInfo;
+
+    eLIBs_memset(&createInfo, 0, sizeof(__gui_manwincreate_para_t));
+
+    createInfo.name             = "HomeWindow";
+    createInfo.hParent          = parent;
+    createInfo.hHosting         = NULL;
+    createInfo.ManWindowProc    = (__pGUI_WIN_CB)esKRNL_GetCallBack((__pCBK_t)homeWndProc);
+    createInfo.attr             = domUIConfig;
+    hWin                        = GUI_ManWinCreate(&createInfo);
+
+    if (NULL == hWin) {
+        LogE("Create main window (%s) failed", createInfo.name);
+        return NULL;
+    }
+#ifdef THIS_DEBUG
+    LogMI("Hello main window (%s)", createInfo.name);
+#endif
+    return hWin;
+}
+
+

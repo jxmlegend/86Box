@@ -1,0 +1,343 @@
+
+#include "cp_i.h"
+#include "scrolling_i.h"
+#include "Sslider.h"
+#ifdef THIS_DEBUG
+#undef THIS_DEBUG
+#endif
+#ifdef MW_PROJ_DEBUG
+#define THIS_DEBUG
+#endif
+
+static __s32 scrollingManagementWndProc(__gui_msg_t * msg)
+{
+    SCR_ScrollingMainWinDescriptor * wndDpt;
+	H_WIN hwin;
+	char name[20];
+	
+    wndDpt = (SCR_ScrollingMainWinDescriptor *)GUI_WinGetAttr(msg->h_deswin);
+    if ((!wndDpt) || (-1 == EWin_CheckInherit(&wndDpt->scrolling.ewii)) ||
+        (!(wndDpt->scrolling.ewii.mask[0] & SCR_WNDINFOMASK_SMANAGE))) {
+        LogE("Null or wrong scrolling management window private data");
+        return -1;
+    }
+    switch (msg->id) {
+    case GUI_MSG_CREATE:
+        wndDpt->scrolling.ewii.hWnd = msg->h_deswin;
+		__here__;
+        break;
+    case GUI_MSG_DESTROY:
+        esMEMS_Mfree(0, wndDpt);
+        break;
+	case GUI_MSG_SET_FOCUS:
+		hwin = GUI_WinGetNextBro(GUI_WinGetFirstChild(msg->h_deswin));
+		GUI_WinGetName(hwin,name);
+		if(eLIBs_strcmp(name, "clock_button")==0){
+            msg->h_deswin = hwin;
+			msg->id = GUI_MSG_SET_FOCUS;
+			GUI_PostMessage(msg);
+		}
+		return 0;
+	case GUI_MSG_SET_UNFOCUS:
+		hwin = GUI_WinGetNextBro(GUI_WinGetFirstChild(msg->h_deswin));
+		GUI_WinGetName(hwin,name);
+		if(eLIBs_strcmp(name, "clock_button")==0){
+            msg->h_deswin = hwin;
+			msg->id = GUI_MSG_SET_UNFOCUS;
+			GUI_PostMessage(msg);
+		}
+		return 0;
+		//break;
+    default:
+#ifdef THIS_DEBUG
+        LogMI("Unhandled scrolling management window message (%d)", msg->id);
+#endif
+        break;
+    }
+    return GUI_ManWinDefaultProc(msg);
+}
+
+H_WIN ScrollingAppendManage(char * name, SCR_ScrollingWndInfo_ForHeader * inherit)
+{
+    SCR_ScrollingMainWinDescriptor * wndDpt;
+
+    if (-1 == EWin_CheckInherit(&inherit->ewii)) return NULL;
+
+    wndDpt = (SCR_ScrollingMainWinDescriptor *)esMEMS_Malloc(0, sizeof(SCR_ScrollingMainWinDescriptor));
+    if (NULL == wndDpt) {
+        LogE("Malloc failed");
+        return NULL;
+    }
+    eLIBs_memset(wndDpt, 0, sizeof(SCR_ScrollingMainWinDescriptor));
+    eLIBs_memcpy(wndDpt, inherit, sizeof(SCR_ScrollingWndInfo_ForHeader));
+    wndDpt->scrolling.ewii.mask[0] = SCR_WNDINFOMASK_SMANAGE;
+
+    return EWin_MainWindowCreate(name, &wndDpt->scrolling.ewii, scrollingManagementWndProc);
+}
+
+static __s32 scrollingPageProc(__gui_msg_t * msg)
+{
+    SCR_ScrollingPageDescriptor * wndDpt;
+    int i;
+
+    wndDpt = (SCR_ScrollingPageDescriptor *)GUI_WinGetAttr(msg->h_deswin);
+    if ((!wndDpt) || (-1 == EWin_CheckInherit(&wndDpt->scrolling.ewii)) ||
+        (!(wndDpt->scrolling.ewii.mask[0] & SCR_WNDINFOMASK_SBACKGROUND))) {
+        LogE("Null or wrong scrolling page window private data");
+        return -1;
+    }
+    switch (msg->id) {
+    case GUI_MSG_CREATE:
+        // The following members must be set
+        wndDpt->scrolling.ewii.hWnd = msg->h_deswin;
+        // Setting end
+
+        i = SLIB_atoi(GG_DOMGetNodeValue(GG_DOMGetNextElementByTagName(wndDpt->pageNode, "background")));
+        wndDpt->background = dsk_theme_open(i);
+#ifdef THIS_DEBUG
+        LogMI("Background: %d", i);
+#endif
+        wndDpt->backgroundData = dsk_theme_hdl2buf(wndDpt->background);
+        wndDpt->pageNode = GG_NULL;
+        break;
+    case GUI_MSG_DESTROY:
+        dsk_theme_close(wndDpt->background);
+        esMEMS_Mfree(0, wndDpt);
+        break;
+    case GUI_MSG_PAINT:
+        GUI_LyrWinSel(wndDpt->scrolling.ewii.lyrLow);
+        GUI_BMP_Draw(wndDpt->backgroundData, wndDpt->scrolling.ewii.wndRect.x + wndDpt->scrolling.wndRect.x,
+                        wndDpt->scrolling.ewii.wndRect.y + wndDpt->scrolling.wndRect.y);
+        break;
+    default:
+#ifdef THIS_DEBUG
+        LogMI("Unhandled scrolling page window message (%d)", msg->id);
+#endif
+        break;
+    }
+
+    return GUI_FrmWinDefaultProc(msg);
+}
+
+H_WIN ScrollingAppendPage(char * name, SCR_ScrollingWndInfo_ForHeader * inherit, int size, gg_handler pageNode, H_WIN hLayer, __pGUI_WIN_CB wndProc)
+{
+    SCR_ScrollingPageDescriptor * wndDpt;
+
+    if (-1 == EWin_CheckInherit(&inherit->ewii)) return NULL;
+    if (size <= 0) size = sizeof(SCR_ScrollingPageDescriptor);
+
+    wndDpt = (SCR_ScrollingPageDescriptor *)esMEMS_Malloc(0, size);
+    if (NULL == wndDpt) {
+        LogE("Malloc failed");
+        return NULL;
+    }
+    eLIBs_memset(wndDpt, 0, sizeof(SCR_ScrollingPageDescriptor));
+    eLIBs_memcpy(wndDpt, inherit, sizeof(SCR_ScrollingWndInfo_ForHeader));
+    wndDpt->scrolling.ewii.mask[0] = SCR_WNDINFOMASK_SBACKGROUND;
+
+    wndDpt->pageNode = pageNode;
+    
+    if (wndProc) {
+		__here__;
+        return EWin_FrameWindowCreate(name, &wndDpt->scrolling.ewii, hLayer, &wndDpt->scrolling.wndRect, wndProc);
+    } else {
+        return EWin_FrameWindowCreate(name, &wndDpt->scrolling.ewii, hLayer, &wndDpt->scrolling.wndRect, scrollingPageProc);
+    }
+}
+
+static __s32 scrollingButtonProc(__gui_msg_t * msg)
+{
+    SCR_ScrollingButtonDescriptor * wndDpt;
+	SimpleSliderClass cls;
+    gg_handler firstNode;
+    gg_handler node;
+    RECT rect;
+    H_WIN hwnd;
+     int i;
+	 
+    wndDpt = (SCR_ScrollingButtonDescriptor *)GUI_WinGetAttr(msg->h_deswin);
+    if ((!wndDpt) || (-1 == EWin_CheckInherit(&wndDpt->scrolling.ewii)) ||
+        (!(wndDpt->scrolling.ewii.mask[0] & SCR_WNDINFOMASK_SBUTTON))) {
+        LogE("Null or wrong scrolling button window data");
+        return -1;
+    }
+    switch (msg->id) {
+    case GUI_MSG_CREATE:
+        // The following members must be set
+        wndDpt->scrolling.ewii.hWnd = msg->h_deswin;
+       
+        wndDpt->scrolling.ewii.mask[0] |= SCR_WNDINFOMASK_GESTURE;
+        wndDpt->scrolling.ewii.gestureArgs.attr_x |= GG_GESTURE_ATTR_CLICK;
+		//wndDpt->scrolling.ewii.gestureArgs.attr_y |= GG_GESTURE_ATTR_SLIDE;
+        wndDpt->scrolling.ewii.gestureArgs.hmsg_x[GG_GESTURE_MSG_DEST_CLICK] = msg->h_deswin;
+		//wndDpt->scrolling.ewii.gestureArgs.hmsg_y[GG_GESTURE_MSG_DEST_SLIDE] = msg->h_deswin;
+	    wndDpt->inva = INVALIDATE_BUTTON;
+		
+        // Setting end
+        firstNode = GG_DOMGetFirstChild(wndDpt->buttonNode);
+
+        wndDpt->nameOn = GG_DupStr(GG_DOMGetNodeValue(GG_DOMGetBrotherElementByTagName(firstNode, "name_on")));
+		wndDpt->button_type = GG_DupStr(GG_DOMGetNodeValue(GG_DOMGetBrotherElementByTagName(firstNode, "controltype")));
+		wndDpt->btn_up= GG_DupStr(GG_DOMGetNodeValue(GG_DOMGetBrotherElementByTagName(firstNode, "key_up_code")));
+		wndDpt->btn_down = GG_DupStr(GG_DOMGetNodeValue(GG_DOMGetBrotherElementByTagName(firstNode, "key_down_code")));
+        i = SLIB_atoi(GG_DOMGetNodeValue(GG_DOMGetBrotherElementByTagName(firstNode, "icon_on")));
+        wndDpt->buttonOn = dsk_theme_open(i);
+        wndDpt->nameOff = GG_DupStr(GG_DOMGetNodeValue(GG_DOMGetBrotherElementByTagName(firstNode, "name_off")));
+        i = SLIB_atoi(GG_DOMGetNodeValue(GG_DOMGetBrotherElementByTagName(firstNode, "icon_off")));
+        wndDpt->buttonOff = dsk_theme_open(i);
+        
+        node = GG_DOMGetBrotherElementByTagName(firstNode, "x");
+        wndDpt->scrolling.ewii.wndRect.x = SLIB_atoi(GG_DOMGetNodeValue(node));
+        node = GG_DOMGetBrotherElementByTagName(firstNode, "y");
+        wndDpt->scrolling.ewii.wndRect.y = SLIB_atoi(GG_DOMGetNodeValue(node));
+        node = GG_DOMGetBrotherElementByTagName(firstNode, "width");
+        wndDpt->scrolling.ewii.wndRect.width = SLIB_atoi(GG_DOMGetNodeValue(node));
+        node = GG_DOMGetBrotherElementByTagName(firstNode, "height");
+        wndDpt->scrolling.ewii.wndRect.height = SLIB_atoi(GG_DOMGetNodeValue(node));
+        // Window rectangle changed, sync to the window attribute
+        GG_FillRect(&rect, wndDpt->scrolling.wndRect.x + wndDpt->scrolling.ewii.wndRect.x,
+                            wndDpt->scrolling.wndRect.y + wndDpt->scrolling.ewii.wndRect.y,
+                            wndDpt->scrolling.ewii.wndRect.width,
+                            wndDpt->scrolling.ewii.wndRect.height);
+        GUI_WinSetWinRECT(msg->h_deswin, &rect);
+        wndDpt->buttonOnData = dsk_theme_hdl2buf(wndDpt->buttonOn);
+        wndDpt->buttonOffData = dsk_theme_hdl2buf(wndDpt->buttonOff);
+        wndDpt->buttonNode = NULL;
+        wndDpt->inva = INVALIDATE_ALL;
+        break;
+    case GUI_MSG_DESTROY:
+        dsk_theme_close(wndDpt->buttonOff);
+        dsk_theme_close(wndDpt->buttonOn);
+        esMEMS_Mfree(0, wndDpt);
+        break;
+    case GUI_MSG_PAINT:
+        if (wndDpt->inva) {
+            GUI_LyrWinSel(wndDpt->scrolling.ewii.lyrHigher);
+        }
+        if (INVALIDATE_BUTTON & wndDpt->inva) {
+            if (wndDpt->buttonStatus) {
+                GUI_BMP_Draw(wndDpt->buttonOnData, wndDpt->scrolling.ewii.wndRect.x + wndDpt->scrolling.wndRect.x,
+                                wndDpt->scrolling.ewii.wndRect.y + wndDpt->scrolling.wndRect.y);
+            } else {
+                GUI_BMP_Draw(wndDpt->buttonOffData, wndDpt->scrolling.ewii.wndRect.x + wndDpt->scrolling.wndRect.x,
+                                wndDpt->scrolling.ewii.wndRect.y + wndDpt->scrolling.wndRect.y);
+            }
+        }else if(INVALIDATE_SLIDER & wndDpt->inva){
+            
+		}
+        //wndDpt->inva = INVALIDATE_NULL;
+        break;
+	case GUI_MSG_USER_GESTURE_MO:
+		wndDpt->buttonStatus = wndDpt->buttonStatus?0:1;
+		GUI_WinUpdate(msg->h_deswin,ORANGE_TRUE);
+	    break;
+    case GUI_MSG_USER_GESTURE_MOVE:
+		
+		break;
+    case GUI_MSG_USER_GESTURE_DONE:
+		__msg("GUI_MSG_USER_GESTURE_done\n");
+		break;
+    case GUI_MSG_USER_GESTURE_CLICK:
+        wndDpt->buttonStatus = wndDpt->buttonStatus ? 0 : 1;
+		GUI_WinUpdate(msg->h_deswin, ORANGE_TRUE);
+		dsk_keytone_on();
+        break;
+    default:
+#ifdef THIS_DEBUG
+        LogMI("Unhandled scrolling button window message (%d)", msg->id);
+#endif
+        GUI_FrmWinDefaultProc(msg);
+        break;
+    }
+    return 0;
+}
+
+H_WIN ScrollingAppendButton(char * name, SCR_ScrollingWndInfo_ForHeader * inherit, gg_handler buttonNode, __pGUI_WIN_CB wndProc)
+{
+    SCR_ScrollingButtonDescriptor * wndDpt;
+
+    if (-1 == EWin_CheckInherit(&inherit->ewii)) return NULL;
+
+    wndDpt = (SCR_ScrollingButtonDescriptor *)esMEMS_Malloc(0, sizeof(SCR_ScrollingButtonDescriptor));
+    if (NULL == wndDpt) {
+        LogE("Malloc failed");
+        return NULL;
+    }
+    eLIBs_memset(wndDpt, 0, sizeof(SCR_ScrollingButtonDescriptor));
+    eLIBs_memcpy(wndDpt, inherit, sizeof(SCR_ScrollingWndInfo_ForHeader));
+    wndDpt->scrolling.ewii.mask[0] = SCR_WNDINFOMASK_SBUTTON;
+
+    wndDpt->buttonNode = buttonNode;
+
+    if (wndProc) {
+        return EWin_FrameWindowCreate(name, &wndDpt->scrolling.ewii, wndDpt->scrolling.ewii.lyrHigher, &wndDpt->scrolling.wndRect, wndProc);
+    } else {
+        return EWin_FrameWindowCreate(name, &wndDpt->scrolling.ewii, wndDpt->scrolling.ewii.lyrHigher, &wndDpt->scrolling.wndRect, scrollingButtonProc);
+    }
+}
+
+H_WIN ScrollingCreate_V0001(SCR_ScrollingWndInfo_ForHeader * inherit, gg_handler pageNode)
+{
+    SCR_ScrollingWndInfo_ForHeader * wndInfo;
+    H_WIN hRetWnd;
+    H_WIN hWnd;
+    gg_handler button;
+
+    hWnd = ScrollingAppendManage(GG_DOMGetNodeValue(GG_DOMGetNextElementByTagName(pageNode, "name")), inherit);
+    hRetWnd = hWnd;
+    if (hWnd) {
+        wndInfo = (SCR_ScrollingWndInfo_ForHeader *)GUI_WinGetAttr(hWnd);
+        hWnd = ScrollingAppendPage(GG_DOMGetNodeValue(GG_DOMGetNextElementByTagName(pageNode, "name")), wndInfo, 0, pageNode, inherit->ewii.lyrLow, NULL);
+        button = GG_DOMGetNextElementByTagName(pageNode, "button");
+        while (button) {
+            ScrollingAppendButton(GG_DOMGetNodeValue(GG_DOMGetNextElementByTagName(button, "name_on")), wndInfo, button, NULL);
+            button = GG_DOMGetNextBrother(button);
+            button = GG_DOMGetBrotherElementByTagName(button, "button");
+        }
+    }
+    return hRetWnd;
+}
+
+static __s32 scrollingBorderWndProc(__gui_msg_t * msg)
+{
+    SCR_ScrollingPageDescriptor * wndDpt;
+
+    wndDpt = (SCR_ScrollingPageDescriptor *)GUI_WinGetAttr(msg->h_deswin);
+    if ((!wndDpt) || (-1 == EWin_CheckInherit(&wndDpt->scrolling.ewii)) ||
+        (!(wndDpt->scrolling.ewii.mask[0] & SCR_WNDINFOMASK_SBACKGROUND))) {
+        LogE("Null or wrong scrolling page window private data");
+        return -1;
+    }
+    switch (msg->id) {
+    case GUI_MSG_DESTROY:
+        esMEMS_Mfree(0, wndDpt);
+        break;
+    case GUI_MSG_PAINT:
+        GUI_SetColor(GUI_BLACK);
+        GUI_LyrWinSel(wndDpt->scrolling.ewii.lyrHigher);
+        GUI_FillRect(wndDpt->scrolling.ewii.wndRect.x + wndDpt->scrolling.wndRect.x,
+                    wndDpt->scrolling.ewii.wndRect.y + wndDpt->scrolling.wndRect.y,
+                    wndDpt->scrolling.ewii.wndRect.x + wndDpt->scrolling.wndRect.x + wndDpt->scrolling.ewii.wndRect.width,
+                    wndDpt->scrolling.ewii.wndRect.y + wndDpt->scrolling.wndRect.y + wndDpt->scrolling.ewii.wndRect.height);
+        break;
+    }
+    return GUI_FrmWinDefaultProc(msg);
+}
+
+H_WIN ScrollingBorderWndCreate_V0001(char * name, SCR_ScrollingWndInfo_ForHeader * inherit)
+{
+    SCR_ScrollingWndInfo_ForHeader * wndInfo;
+    H_WIN hWnd;
+    char buffer[GUI_NAME_MAX];
+
+    hWnd = ScrollingAppendManage(name, inherit);
+    if (hWnd) {
+        wndInfo = (SCR_ScrollingWndInfo_ForHeader *)GUI_WinGetAttr(hWnd);
+        eLIBs_snprintf(buffer, GUI_NAME_MAX, "%s%s", name, "Con");
+        buffer[GUI_NAME_MAX - 1] = '\0';
+        ScrollingAppendPage(buffer, wndInfo, 0, GG_NULL, inherit->ewii.lyrLow, scrollingBorderWndProc);
+    }
+    return hWnd;
+}
+
+

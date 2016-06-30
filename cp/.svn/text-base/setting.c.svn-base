@@ -1,0 +1,258 @@
+
+#include "cp_i.h"
+
+#ifdef THIS_DEBUG
+#undef THIS_DEBUG
+#endif
+#ifdef MW_PROJ_DEBUG
+#define THIS_DEBUG
+#endif
+
+typedef struct {
+    EWin_InheritInfo_ForHeader ewii;
+    int blocks;
+    int padBlocks;
+    SIZE blockSize;
+    int totalLen;
+    int curr;
+
+    GUI_FONT * font;
+    H_LYR layer;
+    HBLOCK hBuffer;
+    HBLOCK hBlockBg;
+} NEWROLLER;
+
+typedef struct {
+    EWin_InheritInfo_ForHeader ewii;
+    HTHEME bg;
+    void * bgData;
+} BottomFrameWndInfo;
+
+static __s32 settingTopWndProc(__gui_msg_t * msg)
+{
+#define OFFSET_X    25
+    NEWROLLER * wndDpt;
+    RECT rect;
+    RECT source;
+    FB fb;
+    int i;
+    char str[16];
+
+    wndDpt = (NEWROLLER *)GUI_WinGetAttr(msg->h_deswin);
+    if ((!wndDpt) || (-1 == EWin_CheckInherit(&wndDpt->ewii))) {
+        LogE("Null or wrong setting window private data");
+        return -1;
+    }
+    switch (msg->id) {
+    case GUI_MSG_CREATE:
+        wndDpt->ewii.hWnd = msg->h_deswin;
+        GG_FillRect(&wndDpt->ewii.wndRect, 140, 120, 80, 60);
+        wndDpt->ewii.mask[0] = SCR_WNDINFOMASK_GESTURE;
+        wndDpt->ewii.gestureArgs.attr_y |= GG_GESTURE_ATTR_INER_BLOCKS;
+        wndDpt->ewii.gestureArgs.hmsg_y[GG_GESTURE_MSG_DEST_INER_BLOCKS] = msg->h_deswin;
+        wndDpt->ewii.gestureArgs.steps_y = 20;
+        wndDpt->ewii.gestureArgs.start_y = 0;
+
+        wndDpt->blocks = 12;
+        wndDpt->padBlocks = 3;
+        GG_FillSize(&wndDpt->blockSize, 16 * 2, 20);
+        wndDpt->totalLen = wndDpt->blocks * wndDpt->blockSize.height;
+        wndDpt->curr = 0;
+
+        wndDpt->font = GUI_SFT_CreateFont(16, "d:\\res\\fonts\\font.sft");
+        GG_FillRect(&rect, 0, 0, wndDpt->blockSize.width,
+                    (wndDpt->blocks + wndDpt->padBlocks) * wndDpt->blockSize.height);
+        GG_FillRect(&source, 0, 0, wndDpt->blockSize.width, wndDpt->blockSize.height);
+        wndDpt->layer = EWin_LayerCreate("SettingRoller", (SIZE *)&rect.width, &source, &source, 0);
+        GUI_LyrWinGetFB(wndDpt->layer, &fb);
+        wndDpt->hBuffer = GUI_BlockCreateFrom(NULL, fb.size.width, fb.size.height, fb.addr[0], 0);
+        GUI_LyrWinGetFB(wndDpt->ewii.lyrHigher, &fb);
+        wndDpt->hBlockBg = GUI_BlockCreateFrom(NULL, fb.size.width, fb.size.height, fb.addr[0], 0);
+
+        GUI_LyrWinSel(wndDpt->layer);
+        GUI_OpenAlphaBlend();
+        GUI_CharSetToEncode(EPDK_CHARSET_ENM_UTF8);
+        GUI_SetFont(wndDpt->font);
+        GUI_SetDrawMode(GUI_DRAWMODE_TRANS);
+        GUI_SetColor(GUI_BLACK);
+        for (i = 0; i < wndDpt->blocks + wndDpt->padBlocks; i++) {
+            eLIBs_sprintf(str, "%d", (i % wndDpt->blocks) + 1);
+            LogMI("%s, %d", str, i);
+            GUI_DispStringAt(str, 0, wndDpt->blockSize.height * i);
+        }
+        GUI_CloseAlphaBlend();
+        break;
+    case GUI_MSG_DESTROY:
+        GUI_BlockDelete(wndDpt->hBlockBg);
+        GUI_BlockDelete(wndDpt->hBuffer);
+        GUI_LyrWinDelete(wndDpt->layer);
+        GUI_SFT_ReleaseFont(wndDpt->font);
+        break;
+    case GUI_MSG_PAINT:
+        GG_FillRect(&rect, 0, wndDpt->curr, wndDpt->blockSize.width, wndDpt->ewii.wndRect.height);
+        GUI_SetBkColor(0);
+        GUI_LyrWinSel(wndDpt->ewii.lyrHigher);
+        GUI_ClearRect(wndDpt->ewii.wndRect.x + OFFSET_X, wndDpt->ewii.wndRect.y, 
+            wndDpt->ewii.wndRect.x + OFFSET_X + rect.width,
+            wndDpt->ewii.wndRect.y + rect.height);
+        GUI_BlockBitBlit(wndDpt->hBlockBg, wndDpt->ewii.wndRect.x + OFFSET_X, wndDpt->ewii.wndRect.y,
+                                wndDpt->hBuffer, &rect, BLITFLAG_COLORALPHA, NULL);
+        break;
+    case GUI_MSG_USER_GESTURE_MOVE:
+        wndDpt->curr = ((int)LOSWORD(msg->dwAddData2));
+        if (wndDpt->curr >= wndDpt->totalLen) {
+            wndDpt->curr = wndDpt->curr % wndDpt->totalLen;
+        } else if (wndDpt->curr < 0) {
+            wndDpt->curr = -wndDpt->curr;
+            wndDpt->curr = wndDpt->curr % wndDpt->totalLen;
+            wndDpt->curr = wndDpt->totalLen - wndDpt->curr;
+        }
+        
+        GUI_WinUpdate(msg->h_deswin, ORANGE_TRUE);
+        return 0;
+    case GUI_MSG_USER_GESTURE_DONE:
+        wndDpt->ewii.gestureArgs.start_y = wndDpt->curr;
+        LogMI("curr %d", wndDpt->ewii.gestureArgs.start_y);
+        break;
+    default:
+        break;
+    }
+
+    return GUI_FrmWinDefaultProc(msg);
+}
+
+static H_WIN settingTopFrameWndCreate(EWin_InheritInfo_ForHeader * inherit)
+{
+    NEWROLLER * wndDpt;
+
+    if (-1 == EWin_CheckInherit(inherit)) return NULL;
+
+    wndDpt = (NEWROLLER *)esMEMS_Malloc(0, sizeof(NEWROLLER));
+    if (NULL == wndDpt) {
+        LogE("Malloc failed");
+        return NULL;
+    }
+    eLIBs_memset(wndDpt, 0, sizeof(NEWROLLER));
+    eLIBs_memcpy(wndDpt, inherit, sizeof(EWin_InheritInfo_ForHeader));
+
+    return EWin_FrameWindowCreate("SettingWinFore", &wndDpt->ewii, wndDpt->ewii.lyrHigher, &wndDpt->ewii.wndRect, settingTopWndProc);
+}
+
+static __s32 settingBottomWndProc(__gui_msg_t * msg)
+{
+    BottomFrameWndInfo * wndDpt;
+
+    wndDpt = (BottomFrameWndInfo *)GUI_WinGetAttr(msg->h_deswin);
+    if ((!wndDpt) || (-1 == EWin_CheckInherit(&wndDpt->ewii))) {
+        LogE("Null or wrong setting window private data");
+        return -1;
+    }
+
+    switch (msg->id) {
+    case GUI_MSG_CREATE:
+        wndDpt->ewii.mask[0] = 0;
+        wndDpt->ewii.hWnd = msg->h_deswin;
+
+        wndDpt->bg = dsk_Systheme_open(ID_CLOCK_BMP_DIGITALCLOCK_BG_BMP);
+        wndDpt->bgData = dsk_Systheme_hdl2buf(wndDpt->bg);
+        break;
+    case GUI_MSG_DESTROY:
+        dsk_theme_close(wndDpt->bg);
+        esMEMS_Mfree(0, wndDpt);
+        break;
+    case GUI_MSG_PAINT:
+        GUI_LyrWinSel(wndDpt->ewii.lyrLow);
+        GUI_BMP_Draw(wndDpt->bgData, wndDpt->ewii.wndRect.x, wndDpt->ewii.wndRect.y);
+        break;
+    case GUI_MSG_USER_GESTURE_LPRESS:
+        msg->h_deswin = wndDpt->ewii.desktop;
+        msg->id = GUI_MSG_USER_WIN_CHANGE;
+        msg->dwAddData2 = HOME_SUBWIN_SCROLLING;
+        GUI_PostMessage(msg);
+        break;
+    default:
+        LogMI("No handled main window message (%d)", msg->id);
+        break;
+    }
+    return GUI_FrmWinDefaultProc(msg);
+}
+
+static H_WIN settingFrameWndCreate(EWin_InheritInfo_ForHeader * inherit)
+{
+    BottomFrameWndInfo * wndDpt;
+
+    if (-1 == EWin_CheckInherit(inherit)) return NULL;
+
+    wndDpt = (BottomFrameWndInfo *)esMEMS_Malloc(0, sizeof(BottomFrameWndInfo));
+    if (NULL == wndDpt) {
+        LogE("Malloc failed");
+        return NULL;
+    }
+    eLIBs_memset(wndDpt, 0, sizeof(BottomFrameWndInfo));
+    eLIBs_memcpy(wndDpt, inherit, sizeof(EWin_InheritInfo_ForHeader));
+
+    return EWin_FrameWindowCreate("SettingWinBg", &wndDpt->ewii, wndDpt->ewii.lyrLow, &wndDpt->ewii.wndRect, settingBottomWndProc);
+}
+
+static __s32 settingMainWndProc(__gui_msg_t * msg)
+{
+    EWin_InheritInfo_ForHeader * wndDpt;
+    RECT source;
+    wndDpt = (EWin_InheritInfo_ForHeader *)GUI_WinGetAttr(msg->h_deswin);
+    if ((!wndDpt) || (-1 == EWin_CheckInherit(wndDpt))) {
+        LogE("Null or wrong setting window private data");
+        return -1;
+    }
+    switch (msg->id) {
+    case GUI_MSG_CREATE:
+        wndDpt->mask[0] |= SCR_WNDINFOMASK_GESTURE;
+        wndDpt->gestureArgs.attr_x = GG_GESTURE_ATTR_LPRESS;
+        wndDpt->gestureArgs.hmsg_x[GG_GESTURE_MSG_DEST_LPRESS] = msg->h_deswin;
+        wndDpt->hWnd = msg->h_deswin;
+        // wndDpt->wndRect, don't set, inherit from parent window
+        GG_FillRect(&source, 0, 0, wndDpt->wndRect.width, wndDpt->wndRect.height);
+        GG_FillSize(&wndDpt->lyrLowSize, wndDpt->wndRect.width, wndDpt->wndRect.height);
+        wndDpt->lyrLow = EWin_LayerCreate("SettingLayerLow", &wndDpt->lyrLowSize, &source, &source, 0);
+        GG_CopySize(&wndDpt->lyrHigherSize, &wndDpt->lyrLowSize);
+        wndDpt->lyrHigher = EWin_LayerCreate("SettingLayerHigher", &wndDpt->lyrHigherSize, &source, &source, 1);
+
+        settingFrameWndCreate(wndDpt);
+        settingTopFrameWndCreate(wndDpt);
+
+        GUI_LyrWinSetSta(wndDpt->lyrLow, GUI_LYRWIN_STA_ON);
+        GUI_LyrWinSetSta(wndDpt->lyrHigher, GUI_LYRWIN_STA_ON);
+        break;
+    case GUI_MSG_DESTROY:
+        GUI_LyrWinDelete(wndDpt->lyrHigher);
+        GUI_LyrWinDelete(wndDpt->lyrLow);
+        esMEMS_Mfree(0, wndDpt);
+        break;
+    case GUI_MSG_USER_GESTURE_LPRESS:
+        msg->h_deswin = wndDpt->desktop;
+        msg->id = GUI_MSG_USER_WIN_CHANGE;
+        msg->dwAddData2 = HOME_SUBWIN_SCROLLING;
+        GUI_PostMessage(msg);
+        break;
+    default:
+        break;
+    }
+    return GUI_ManWinDefaultProc(msg);
+}
+
+H_WIN SettingWndCreate(EWin_InheritInfo_ForHeader * inherit)
+{
+    EWin_InheritInfo_ForHeader * wndDpt;
+    if (-1 == EWin_CheckInherit(inherit)) {
+        return NULL;
+    }
+    wndDpt = (EWin_InheritInfo_ForHeader *)esMEMS_Malloc(0, sizeof(EWin_InheritInfo_ForHeader));
+    if (NULL == wndDpt) {
+        LogE("Malloc failed");
+        return NULL;
+    }
+    eLIBs_memcpy(wndDpt, inherit, sizeof(EWin_InheritInfo_ForHeader));
+    return EWin_MainWindowCreate("SettingWindow", wndDpt, settingMainWndProc);
+}
+
+
+
